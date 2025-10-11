@@ -13,14 +13,17 @@ struct Answer {
 }
 
 contract Survey {
+    // Key-Value Storage (like hashMap)
+    // Key range -> 0 ~ (2^256)-1 => 32 bytes
     string public title;
     string public description;
     uint256 public targetNumber; 
     uint256 public rewardAmount;
     Question[] questions;
     Answer[] answers;
+    mapping (address => uint) testMap;
     
-    // primitive type: int, bool, (string dynamic해서 x)
+    // primitive type: int(~256), bool, address (string dynamic해서 x)
     // memory, storage, calldata
     constructor(
         string memory _title, 
@@ -32,6 +35,7 @@ contract Survey {
         description = _description;
         targetNumber = _targetNumber;
         rewardAmount = msg.value / targetNumber; 
+        testMap[0x8626f6940e2eb28930efb4cef49b2d1f2c9c1199] = 1000;
         for (uint i = 0; i < _questions.length; i++) {
             questions.push(
                 Question({
