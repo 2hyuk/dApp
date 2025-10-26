@@ -35,7 +35,7 @@ contract Survey {
         description = _description;
         targetNumber = _targetNumber;
         rewardAmount = msg.value / targetNumber; 
-        testMap[0x8626f6940e2eb28930efb4cef49b2d1f2c9c1199] = 1000;
+        testMap[0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199] = 1000;
         for (uint i = 0; i < _questions.length; i++) {
             questions.push(
                 Question({

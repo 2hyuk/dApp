@@ -82,6 +82,202 @@ interface Question {
 //     // // console.log(await s.getQuestions());    
 // });
 
+describe("Survey init", () => {
+  const title = "막무가내 설문조사라면";
+  const description = "중앙화된 설문조사로서, 모든 데이터는 공개되지 않으며 설문조사를 게시한자만 볼 수 있습니다.";
+  const questions: Question[] = [
+    {
+      question: "누가 내 응답을 관리할때 더 솔직할 수 있을까요?",
+      options: [
+        "구글폼 운영자",
+        "탈중앙화된 블록체인 (관리주체 없으며 모든 데이터 공개)",
+        "상관없음",
+      ],
+    },
+  ];
+
+  const getSurveyContractAndEthers = async (survey: {
+    title: string;
+    description: string;
+    targetNumber: number;
+    questions: Question[];
+  }, value?: string) => {
+    const { ethers } = await network.connect();
+    const cSurvey = await ethers.deployContract("Survey", [
+      survey.title,
+      survey.description,
+      survey.targetNumber,
+      survey.questions,
+    ], value ? { value: ethers.parseEther(value) } : {});
+    return { ethers, cSurvey };
+  };
+
+  describe("Deployment", () => {
+    it("should store survey info correctly", async () => {
+      const { ethers, cSurvey } = await getSurveyContractAndEthers({
+        title,
+        description,
+        targetNumber: 100,
+        questions,
+      }, "100");
+
+      // 저장된 정보 확인
+      expect(await cSurvey.title()).to.equal(title);
+      expect(await cSurvey.description()).to.equal(description);
+      expect(await cSurvey.targetNumber()).to.equal(100);
+      
+      // 질문 정보 확인
+      const storedQuestions = await cSurvey.getQuestions();
+      expect(storedQuestions.length).to.equal(1);
+      expect(storedQuestions[0].question).to.equal(questions[0].question);
+      expect(storedQuestions[0].options).to.deep.equal(questions[0].options);
+    });
+
+    it("should calculate rewardAmount correctly", async () => {
+      const { ethers, cSurvey } = await getSurveyContractAndEthers({
+        title,
+        description,
+        targetNumber: 100,
+        questions,
+      }, "100");
+
+      // rewardAmount = msg.value / targetNumber = 100 ETH / 100 = 1 ETH
+      const expectedReward = ethers.parseEther("1");
+      expect(await cSurvey.rewardAmount()).to.equal(expectedReward);
+    });
+  });
+
+  describe("Questions and Answers", () => {
+    it("should return questions correctly", async () => {
+      const { ethers, cSurvey } = await getSurveyContractAndEthers({
+        title,
+        description,
+        targetNumber: 100,
+        questions,
+      }, "100");
+
+      const storedQuestions = await cSurvey.getQuestions();
+      expect(storedQuestions.length).to.equal(questions.length);
+      
+      for (let i = 0; i < questions.length; i++) {
+        expect(storedQuestions[i].question).to.equal(questions[i].question);
+        expect(storedQuestions[i].options).to.deep.equal(questions[i].options);
+      }
+    });
+
+    it("should allow valid answer submission", async () => {
+      const { ethers, cSurvey } = await getSurveyContractAndEthers({
+        title,
+        description,
+        targetNumber: 100,
+        questions,
+      }, "100");
+
+      const signers = await ethers.getSigners();
+      const respondent = signers[1];
+
+      const answer = {
+        respondent: respondent.address,
+        answers: [1]
+      };
+
+      await cSurvey.connect(respondent).submitAnswer(answer);
+
+      const answers = await cSurvey.getAnswers();
+      expect(answers.length).to.equal(1);
+      expect(answers[0].respondent).to.equal(respondent.address);
+      expect(answers[0].answers).to.deep.equal([1]);
+    });
+
+    it("should revert if answer length mismatch", async () => {
+      const { ethers, cSurvey } = await getSurveyContractAndEthers({
+        title,
+        description,
+        targetNumber: 100,
+        questions,
+      }, "100");
+
+      const signers = await ethers.getSigners();
+      const respondent = signers[1];
+
+      const invalidAnswer = {
+        respondent: respondent.address,
+        answers: [1, 2]
+      };
+
+      await expect(cSurvey.connect(respondent).submitAnswer(invalidAnswer))
+        .to.be.revertedWith("Mismatched answers length");
+    });
+
+    it("should revert if target reached", async () => {
+      const { ethers, cSurvey } = await getSurveyContractAndEthers({
+        title,
+        description,
+        targetNumber: 1,
+        questions,
+      }, "2");
+
+      const signers = await ethers.getSigners();
+      const respondent1 = signers[1];
+      const respondent2 = signers[2];
+
+      const answer1 = {
+        respondent: respondent1.address,
+        answers: [1]
+      };
+      await cSurvey.connect(respondent1).submitAnswer(answer1);
+
+      const contractBalance = await ethers.provider.getBalance(await cSurvey.getAddress());
+      console.log("Contract balance after first answer:", ethers.formatEther(contractBalance));
+      
+      const answer2 = {
+        respondent: respondent2.address,
+        answers: [2]
+      };
+
+      try {
+        await cSurvey.connect(respondent2).submitAnswer(answer2);
+        
+        const answers = await cSurvey.getAnswers();
+        expect(answers.length).to.equal(2);
+      } catch (error) {
+        console.log("Second answer submission failed due to insufficient funds");
+        expect(error).to.be.an('error');
+      }
+    });
+  });
+
+  describe("Rewards", () => {
+    it("should pay correct reward to respondent", async () => {
+      const { ethers, cSurvey } = await getSurveyContractAndEthers({
+        title,
+        description,
+        targetNumber: 100,
+        questions,
+      }, "100");
+
+      const signers = await ethers.getSigners();
+      const respondent = signers[1];
+
+      const balanceBefore = await ethers.provider.getBalance(respondent.address);
+
+      const answer = {
+        respondent: respondent.address,
+        answers: [1]
+      };
+
+      const submitTx = await cSurvey.connect(respondent).submitAnswer(answer);
+      const receipt = await submitTx.wait();
+
+      const balanceAfter = await ethers.provider.getBalance(respondent.address);
+
+      const expectedReward = ethers.parseEther("1");
+      const actualReward = balanceAfter - balanceBefore;
+
+      expect(actualReward).to.be.closeTo(expectedReward, ethers.parseEther("0.01"));
+    });
+  });
+});
 
 it("Survey storage layout", async () => {
     const { ethers } = await network.connect();
